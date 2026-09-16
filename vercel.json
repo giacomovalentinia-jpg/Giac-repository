@@ -1,0 +1,6 @@
+{
+  "crons": [
+    { "path": "/api/cron/update-standings", "schedule": "59 21 * * *" },
+    { "path": "/api/cron/update-standings", "schedule": "59 22 * * *" }
+  ]
+}
