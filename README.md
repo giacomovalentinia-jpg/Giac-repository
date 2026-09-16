@@ -75,8 +75,56 @@ pubblicate patch upstream.
 
 ## Deploy (Vercel)
 
-1. Collega il repository, imposta tutte le variabili d'ambiente sopra.
-2. Il build esegue `prisma generate` automaticamente (`postinstall`); esegui
-   `npx prisma migrate deploy` contro il database di produzione prima del primo deploy.
-3. Configura il webhook Stripe verso `https://<dominio>/api/billing/webhook`.
-4. `vercel.json` attiva automaticamente i due cron job giornalieri.
+Il comando di build (`npm run build`) esegue automaticamente `prisma generate` e
+`prisma migrate deploy` prima di `next build`: ad ogni deploy le migrazioni vengono applicate al
+database di produzione, non serve eseguirle a mano. L'unico requisito è che `DATABASE_URL` sia
+raggiungibile pubblicamente da Vercel (vero per Neon, Supabase, Vercel Postgres, ecc.).
+
+### 1. Crea i servizi esterni
+
+| Servizio | Cosa serve | Dove |
+|---|---|---|
+| Database Postgres | `DATABASE_URL` | [Neon](https://neon.tech) (gratuito) o [Vercel Postgres](https://vercel.com/storage/postgres) |
+| Claude API | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
+| Stripe | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET` | [dashboard.stripe.com](https://dashboard.stripe.com) — vedi sotto |
+| Classifica Serie A | `FOOTBALL_DATA_API_KEY` | [football-data.org](https://www.football-data.org/client/register) (piano gratuito) |
+| Magic link (opzionale) | `EMAIL_SERVER_*`, `EMAIL_FROM` | un provider SMTP qualsiasi (Resend, Postmark, SES...) |
+
+Per Stripe: crea il prodotto/prezzo da 2,99€/mese o con `npm run stripe:bootstrap`
+(basta `STRIPE_SECRET_KEY` in locale) — stampa l'id da usare come `STRIPE_PRICE_ID`.
+`STRIPE_WEBHOOK_SECRET` si ottiene al passo 4, dopo aver creato il progetto su Vercel (serve
+l'URL del dominio, che si conosce solo dopo il primo deploy).
+
+### 2. Importa il repository su Vercel
+
+1. Vai su [vercel.com/new](https://vercel.com/new) e importa
+   `giacomovalentinia-jpg/Giac-repository`.
+2. Vercel rileva automaticamente Next.js — non serve toccare i comandi di build.
+3. **Prima del primo deploy**, in "Environment Variables" aggiungi tutte le variabili di
+   `.env.example` tranne `STRIPE_WEBHOOK_SECRET` (arriva dopo) e `NEXTAUTH_URL`, che imposti al
+   dominio assegnato da Vercel una volta noto (es. `https://il-mister.vercel.app`) — puoi anche
+   lasciarlo vuoto e completarlo subito dopo il primo deploy con un redeploy.
+4. Genera `NEXTAUTH_SECRET` con `openssl rand -base64 32` e incollalo come variabile.
+5. Avvia il deploy.
+
+### 3. Dopo il primo deploy
+
+1. Copia l'URL assegnato da Vercel, impostalo come `NEXTAUTH_URL` (env var) e ridistribuisci
+   (redeploy) se non l'avevi già impostato.
+2. Su Stripe, crea un webhook endpoint verso `https://<il-tuo-dominio>/api/billing/webhook`,
+   eventi `checkout.session.completed`, `customer.subscription.created`,
+   `customer.subscription.updated`, `customer.subscription.deleted`. Copia il "Signing secret" in
+   `STRIPE_WEBHOOK_SECRET` su Vercel e ridistribuisci.
+3. Verifica in **Project → Settings → Cron Jobs** che i due job su
+   `/api/cron/update-standings` (21:59 e 22:59 UTC) siano attivi — `vercel.json` li registra da
+   solo, non serve configurarli a mano.
+
+### 4. Verifica finale
+
+- Registrati sull'app, controlla che il login funzioni e che il badge mostri "5/5 domande
+  gratuite oggi".
+- Esaurisci le 5 domande e verifica il messaggio di limite raggiunto.
+- Completa un pagamento di test (Stripe in modalità test, carta `4242 4242 4242 4242`) e verifica
+  che il badge passi a "⭐ Premium" senza dover rifare il login.
+- Forza un aggiornamento della classifica per verificare l'integrazione con football-data.org:
+  `curl -X POST https://<dominio>/api/cron/update-standings?force=true -H "x-cron-secret: <CRON_SECRET>"`.
